@@ -8,6 +8,30 @@ import csv
 import sys
 import logging
 
+# ------------------------------------------------ #
+#                     CONFIG                       #
+# ------------------------------------------------ #
+CONFIG = {
+    "base_url": "https://www.hltv.org/matches?selectedDate=",
+    "delay_between_match_requests": 0.2,       # seconds
+    "impersonate_browser": "chrome120",
+    
+    # File outputs
+    "json_output_path": "matches.json",
+    "csv_output_path": "matches.csv",
+
+    # CSV Header (override here)
+    "csv_header": [
+        "MatchID", "URL", "Event", "Datetime",
+        "Team1", "Player1", "Nationality1", "Player2", "Nationality2",
+        "Player3", "Nationality3", "Player4", "Nationality4", "Player5", "Nationality5",
+        "Team2", "Player1", "Nationality1", "Player2", "Nationality2",
+        "Player3", "Nationality3", "Player4", "Nationality4", "Player5", "Nationality5"
+    ]
+}
+# ------------------------------------------------ #
+
+
 # ------------------ Logging Setup ------------------ #
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +48,7 @@ def convert_date_string(date_str):
 
 MATCH_ID_RE_PATTERN = r"https:\/\/www\.hltv\.org\/matches\/(\d+)\/.+"
 
+
 # ------------------ Classes ------------------ #
 class Matches():
     def __init__(self, base_url, day):
@@ -33,7 +58,7 @@ class Matches():
         self.matches = []
 
     def fetch_html(self):
-        resp = requests.get(self.url, impersonate="chrome120")
+        resp = requests.get(self.url, impersonate=CONFIG["impersonate_browser"])
         self.soup = BeautifulSoup(resp.text, "html.parser")
 
     def scrape_html(self):
@@ -54,7 +79,9 @@ class Matches():
         self.match_urls = urls
         logger.info(f"Scraped matches page, found {len(urls)} matches.")
 
-    def load_matches(self, delay=0.2):
+    def load_matches(self):
+        delay = CONFIG["delay_between_match_requests"]
+
         self.fetch_html()
         self.scrape_html()
 
@@ -65,9 +92,11 @@ class Matches():
             match = Match(match_url)
             match.load()
             self.matches.append(match)
+
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"\r{timestamp} [PROGRESS] Retrieved match {i}/{total}", end="", flush=True)
             time.sleep(delay)
+
         print()  # Newline after progress
         logger.info("Finished scraping all matches.")
 
@@ -75,10 +104,8 @@ class Matches():
         return [match.to_json() for match in self.matches]
 
     def to_csv(self):
-        rows = []
-        for match in self.matches:
-            rows.append(match.to_csv())
-        return rows
+        return [match.to_csv() for match in self.matches]
+
 
 class Match():
     def __init__(self, url):
@@ -86,11 +113,7 @@ class Match():
         self.soup = None
 
         match = re.search(MATCH_ID_RE_PATTERN, url)
-        if match:
-            self.match_id = match.group(1)
-        else:
-            logger.warning(f"Couldn't find match id in url {url}")
-            self.match_id = None
+        self.match_id = match.group(1) if match else None
 
         self.teams = []
         self.event = None
@@ -101,7 +124,7 @@ class Match():
         self.scrape_html()
 
     def fetch_html(self):
-        resp = requests.get(self.url, impersonate="chrome120")
+        resp = requests.get(self.url, impersonate=CONFIG["impersonate_browser"])
         self.soup = BeautifulSoup(resp.text, "html.parser")
 
     def scrape_html(self):
@@ -126,6 +149,7 @@ class Match():
                 nationality = flag_img['title'] if flag_img else None
 
                 players.append(Player(player_name, nationality))
+
             self.teams.append(Team(team_name, players))
 
     def extract_time_and_event(self):
@@ -159,6 +183,7 @@ class Match():
             row.extend(team.to_csv())
         return row
 
+
 class Team():
     def __init__(self, name, players):
         self.name = name
@@ -176,6 +201,7 @@ class Team():
             row.extend(player.to_csv())
         return row
 
+
 class Player():
     def __init__(self, name, nationality):
         self.name = name
@@ -190,6 +216,7 @@ class Player():
     def to_csv(self):
         return [self.name, self.nationality]
 
+
 # ------------------ Main Script ------------------ #
 if __name__ == '__main__':
     start_time = time.time()
@@ -200,25 +227,21 @@ if __name__ == '__main__':
 
     logger.info(f"Scraping HLTV matches for date: {formatted}")
 
-    ms = Matches("https://www.hltv.org/matches?selectedDate=", formatted)
+    ms = Matches(CONFIG["base_url"], formatted)
     ms.load_matches()
 
     # Save JSON
-    with open("matches.json", "w", encoding="utf-8") as f:
+    with open(CONFIG["json_output_path"], "w", encoding="utf-8") as f:
         json.dump(ms.to_json(), f, ensure_ascii=False, indent=4)
-    logger.info("Saved matches.json")
+    logger.info(f"Saved {CONFIG['json_output_path']}")
 
     # Save CSV
-    with open("matches.csv", "w", newline="", encoding="utf-8") as f:
+    with open(CONFIG["csv_output_path"], "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["MatchID", "URL", "Event", "Datetime", 
-                         "Team1", "Player1", "Nationality1", "Player2", "Nationality2", 
-                         "Player3", "Nationality3", "Player4", "Nationality4", "Player5", "Nationality5",
-                         "Team2", "Player1", "Nationality1", "Player2", "Nationality2", 
-                         "Player3", "Nationality3", "Player4", "Nationality4", "Player5", "Nationality5"])
+        writer.writerow(CONFIG["csv_header"])
         for row in ms.to_csv():
             writer.writerow(row)
-    logger.info("Saved matches.csv")
+    logger.info(f"Saved {CONFIG['csv_output_path']}")
 
     end_time = time.time()
     logger.info(f"Total execution time: {end_time - start_time:.2f} seconds")
