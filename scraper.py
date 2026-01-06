@@ -7,6 +7,13 @@ import json
 import csv
 import sys
 import logging
+from enum import Enum
+
+class MatchStatus(Enum):
+    FUTURE = "future"
+    LIVE = "live"
+    PAST = "past"
+
 
 # ------------------------------------------------ #
 #                     CONFIG                       #
@@ -18,16 +25,7 @@ CONFIG = {
     
     # File outputs
     "json_output_path": "matches.json",
-    "csv_output_path": "matches.csv",
 
-    # CSV Header (override here)
-    "csv_header": [
-        "MatchID", "URL", "Event", "Datetime",
-        "Team1", "Player1", "Nationality1", "Player2", "Nationality2",
-        "Player3", "Nationality3", "Player4", "Nationality4", "Player5", "Nationality5",
-        "Team2", "Player1", "Nationality1", "Player2", "Nationality2",
-        "Player3", "Nationality3", "Player4", "Nationality4", "Player5", "Nationality5"
-    ]
 }
 # ------------------------------------------------ #
 
@@ -118,6 +116,7 @@ class Match():
         self.teams = []
         self.event = None
         self.datetime = None
+        self.status = None
 
     def load(self):
         self.fetch_html()
@@ -126,6 +125,8 @@ class Match():
     def fetch_html(self):
         resp = requests.get(self.url, impersonate=CONFIG["impersonate_browser"])
         self.soup = BeautifulSoup(resp.text, "html.parser")
+        with open("single_match_future.html", "w", encoding="utf-8") as f:
+            f.write(self.soup.prettify())
 
     def scrape_html(self):
         self.extract_teams_players()
@@ -160,6 +161,7 @@ class Match():
         time_div = container.find("div", class_="time")
         date_div = container.find("div", class_="date")
         event_div = container.find("div", class_="event")
+        status_div = container.find("div", class_="countdown")
 
         time_str = time_div.text.strip() if time_div else None
         date_str = convert_date_string(date_div.text.strip()) if date_div else None
@@ -168,13 +170,27 @@ class Match():
         self.datetime = date_str + f' {time_str}' if date_str and time_str else None
         self.event = event_name
 
+
+        if status_div:
+            text = status_div.get_text(strip=True).lower()
+
+            if "match over" in text:
+                self.status = MatchStatus.PAST
+            elif "live" in text:
+                self.status = MatchStatus.LIVE
+            else:
+                self.status = MatchStatus.FUTURE
+            
+
     def to_json(self):
         return {
             "match_id": self.match_id,
             "url": self.url,
             "event": self.event,
             "datetime": self.datetime,
+            "status": self.status.value,
             "teams": [team.to_json() for team in self.teams]
+            
         }
 
     def to_csv(self):
@@ -221,27 +237,24 @@ class Player():
 if __name__ == '__main__':
     start_time = time.time()
 
-    days_ahead = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-    target_date = datetime.now() + timedelta(days=days_ahead)
-    formatted = target_date.strftime("%Y-%m-%d")
+    url = 'https://www.hltv.org/matches/2388121/b8-vs-natus-vincere-starladder-budapest-major-2025'
+    m = Match(url)
+    m.load()
+    print(m.to_json())
+    # days_ahead = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    # target_date = datetime.now() + timedelta(days=days_ahead)
+    # formatted = target_date.strftime("%Y-%m-%d")
 
-    logger.info(f"Scraping HLTV matches for date: {formatted}")
+    # logger.info(f"Scraping HLTV matches for date: {formatted}")
 
-    ms = Matches(CONFIG["base_url"], formatted)
-    ms.load_matches()
+    # ms = Matches(CONFIG["base_url"], formatted)
+    # ms.load_matches()
 
-    # Save JSON
-    with open(CONFIG["json_output_path"], "w", encoding="utf-8") as f:
-        json.dump(ms.to_json(), f, ensure_ascii=False, indent=4)
-    logger.info(f"Saved {CONFIG['json_output_path']}")
+    # # Save JSON
+    # with open(CONFIG["json_output_path"], "w", encoding="utf-8") as f:
+    #     json.dump(ms.to_json(), f, ensure_ascii=False, indent=4)
+    # logger.info(f"Saved {CONFIG['json_output_path']}")
 
-    # Save CSV
-    with open(CONFIG["csv_output_path"], "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(CONFIG["csv_header"])
-        for row in ms.to_csv():
-            writer.writerow(row)
-    logger.info(f"Saved {CONFIG['csv_output_path']}")
 
     end_time = time.time()
     logger.info(f"Total execution time: {end_time - start_time:.2f} seconds")
